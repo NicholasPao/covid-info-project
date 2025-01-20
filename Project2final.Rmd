@@ -1,0 +1,320 @@
+---
+title: "Social And Behavioral Factors Affecting COVID-19 Transmissibility (Project 2)"
+author: "Nicholas Pao"
+date: "4/27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", warning = F, message = F, R.options=list(max.print=1000, dplyr.print_max=1000))
+```
+
+## Title and Introduction
+
+*The main purpose of this project is to evaluate the impact of social and behavioral factors on COVID-19 transmissibility. In order to accomplish this, we looked at the 'covid2020' dataset which is a merged dataset composed of the 'countryhealthstats' dataset from the World Bank website, 'diet2020' dataset from Kaggle, and 'totaltests' dataset from the 'Our World in Data' website. The variables contained in the 'covid2020' dataset are the % of urban population, the % of unemployment, the % of rural population, the % of people above the age of 65, the % of people with access to proper sanitation, alcohol intake as a percentage of total calories in diet, the % of obesity,the % of population with confirmed covid cases, the % of population dead due to COVID-19, the population, and the total yearly tests for different countries around the world. This dataset also has 102 observations with each observation representing a unique country. The 'covid2020' dataset is particularly interesting to us because social and behavioral factors described in this dataset shape the everyday life of people and thus will no doubt impact the disease prevalence of diseases like COVID-19 around the world. Some interesting trends we expect are a positive correlation between the percentage of elderly population in a country and the death due to COVID-19  rate, and we also expect health conditions like obesity and undernourishment to be positively correlated with COVID-19 occurrence. The 'countryhealthstats' dataset was tidied before it merged with the other two datasets to create the 'covid2020' dataset. In the 'countryhealthstats' dataset, we moved the different variables from the 'Series Name' column to separate columns of their own using pivot_wider, thus tidying the dataset. In this project, we also explore the dataset using PCA and clustering to view the different ways in which the countries are grouped or related. We also import a new dataset which reports the HDI of each country from the World Population Review Website and compare to see if the country clusters match the development status of the countries. Finally, we use classification to see if we can use the COVID-19 related variables in the dataset to predict the development status of the country and then we evaluate that classification model to check if it has any signs of overfitting.*
+
+
+
+## Correlation Matrix with Univariate and Bivariate graphs
+
+```{r fig.dim = c(20, 20)}
+#Call all the relevant packages
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(GGally)
+library(ggplot2)
+library(plotROC)
+library(caret)
+library(psych)
+
+# Call the 'covid2020' dataset
+library(readr)
+covid2020 <- read_csv("covid2020.csv") 
+
+
+#Remove the variable 'Handwash%' from the 'covid2020' dataset as it contains too many 'NA' values
+covid2020 <- covid2020 %>% select(-`Handwash%`, -Undernourished)
+
+# Save a new dataset called 'covid2020num' containing only the numeric variables from the 'covid2020' dataset 
+covid2020num <- covid2020 %>% select(is.numeric)
+
+
+
+# Make a correlation matrix with bivariate and univariate graphs for the 'covid2020num' dataset
+pairs.panels(covid2020num, 
+             method = "pearson", # correlation coefficient method
+             hist.col = "blue", # color of histogram 
+             smooth = FALSE, density = FALSE, ellipses = FALSE, cex.labels=2, cex.axis=1.5)
+
+```
+
+*The needed packages were called then our covid2020 dataset, used from our last project, was uploaded using the read_csv function. The covid2020 dataset included the country names and statistics about their population such as the urban population %, the confirmed cases, %, the amount of yearly tests, etc. We then selected only the numeric variables from our covid2020 dataset and saved it to covid2020num and made a correlation matrix with bivariate and univariate graphs for its respective numeric variables. Technically, the UrbanPop% and the RuralPop% were the most correlated with a correlation coefficient of -1.00 but this was expected as they are complete opposite statistics. The confirmed case and death percentage were the second most correlated with a correlation coefficient of about .83 which makes sense as the death percentage due to covid19 is sure to be in high correspondence among those who had caught the virus with the lethality of covid19 around the world. Unemployment% and yearly_tests as well as Alcohol% and yearly_tests were tied for the least correlated pairs of variables with correlation coefficients of 0.01 and -0.01 respectively. This makes sense as one would expect these variables to have no relationship with each other.*
+
+##PCA
+```{r}
+#Make a 'covid2020scaled' dataset containing only scaled numeric variables with no missing values from the 'covid2020num' dataset
+covid2020scaled <- covid2020num %>% scale %>% as.data.frame() %>% na.omit
+
+#Conduct a pca on the 'covid2020scaled' dataset
+pca <- covid2020scaled %>% prcomp()
+
+# Visualize percentage of variances for each PC in a scree plot
+fviz_eig(pca, addlabels = TRUE, ylim = c(0, 70))
+
+# Visualize the 5 top contributions of the variables to the PCs as a percentage
+  # Note the red dash line indicates the average contribution
+fviz_contrib(pca, choice = "var", axes = 1, top = 5) # on PC1
+fviz_contrib(pca, choice = "var", axes = 2, top = 5) # on PC2
+
+# Visualize the contributions of the variables to the PCs in a table
+get_pca_var(pca)$coord
+
+# Visualize the contributions of the variables to the PCs in a correlation circle
+fviz_pca_var(pca, col.var = "black", 
+             repel = TRUE) # Avoid text overlapping
+
+# Visualize the individuals according to PC1 and PC2
+fviz_pca_ind(pca,
+             geom.ind = "point", # show points only (nbut not "text")
+             palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+             addEllipses = TRUE, # Concentration ellipses
+             legend.title = "outcome"
+             )
+
+#Total Variation Explained by the 2 PCs
+44.4+14.2
+```
+*In the code chunk, we first scaled the 'covid2020num' dataset and removed missing values to ready it for PCA analysis. Then, we conducted PCA on the scaled dataset. We visualized the percentage of variance explained by each PC. The first PC explained about 44.4% of the variation, the second PC explained about 14.2% of the variation, the third PC explains about 12.3% of the variation, and the fourth PC explains about 10% of the variation. Technically, we would need to include 4 dimensions to have at least 80% variance explained, but for visualization purposes we will be sticking 2 principal components since that is easy to visualize. We then visualized which were the top 5 variables contributing to each of the 2 principal components. The top 5 contributing variables to the first principle component are 'Obesity', 'RuralPop%', 'UrbanPop%', 'Sanitation%', and '65above%', and all these 5 variables contributed around an equal amount to PC1 ranging from 10-15% contribution per variable. The top 5 contributing variables to the second principle component are 'yearly_test', 'population', 'Death%', 'Confirmed%', and 'Obesity', and here only 'yearly_test' and 'Population' contributed significantly to PC2 with each variable contributing around 40%, while the other 3 variables each had contributions below 5% to PC2. Based on the values of how each variable contributed to each PC, we determined what it would mean to score high in each PC.  If a country were to score high in PC1, it would mean that the country has a high urban population %, a moderately high unemployment rate, a low rural population %, a high population of people above 65 years old, a high availability of sanitation facilities, a relatively high alcohol consumption %, a high obesity rate, a high % of COVID-19 confirmed cases, a high percentage of COVID deaths, a moderately low population, and moderate amount of COVID-19 tests conducted yearly compared to other countries. If a country were to score high in PC2, it would mean that they have a moderately low urban population %, moderately low employment %, moderately high rural population %, moderately high percentage of people above the 65, moderate availability of sanitation facilities, moderate consumption of alcoholic beverages, moderately high % of COVID-19 confirmed cases and deaths, very high population, and very high amount of COVID-19 tests conducted yearly. We then visualized the PCs in a correlation circle and in terms of where the individual countries lay. Overall, the 2 PCs displayed on the graph explained about 58.6% of the total variation.*
+
+
+##Clustering
+```{r}
+
+# Prepare the data (drop the categorical variable 'Country' because it has too many categories) for Gower dissimilarities 
+covid2020gow <- covid2020 %>%
+  select(-Country)
+
+
+# Apply 'gower' metric to the 'covid2020gow' dataset and save it as the matrix 'covid2020_gower'
+covid2020_gower <- daisy(covid2020gow, metric = "gower") %>%
+  # Save as a matrix
+  as.matrix
+
+
+# Save an object 'test' which looks at the distances between pairs of countries
+test <- covid2020_gower %>%
+  # Save 'covid2020_gower' as a dataframe
+  as.data.frame %>%
+  # ID each row
+  rownames_to_column("country1") %>%
+  # Cross the ID of the country
+  pivot_longer(-1, names_to = "country2", values_to = "distance") %>%
+  # Get rid of pairs of the same country
+  filter(country1 != country2) %>%
+  # Avoid having the same pairs
+  distinct(distance, .keep_all = TRUE) 
+
+#View the distances between the country pairs
+ test
+ 
+#Determine the number of optimum clusters to run for 'pam'
+ fviz_nbclust(covid2020_gower, pam, method = "silhouette")
+ 
+ 
+#Run pam clustering for 'covid2020_gower' with 2 clusters
+ pam_results <- pam(covid2020_gower, k = 2, diss = TRUE)
+ 
+#Have a look at the pam_results
+pam_results
+
+#Determine the countries at the centers of each cluster
+covid2020[96,]
+covid2020[63,]
+
+#Determine the silhouette width for running pam with 2 clusters
+pam_results$silinfo$avg.width
+
+#Now add the clustering results to the 'covid2020gow' dataset and overwrite that dataset as 'covid_pam'
+covid_pam <- covid2020gow %>%
+  mutate(cluster = as.factor(pam_results$clustering)) %>% na.omit
+
+```
+
+*First, we selected all variables besides the country variable and saved it as a new dataset called covid2020gow. We then calculated gower's distance between all the observations with the daisy function and saved it as a matrix named 'covid2020_gower'. Then with this dataset, using dplyr, we found the gower distance between each country and saved it as a new dataset called 'test'. Then, fviz_nbclust was used to find that the optimal number of clusters needed for our covid2020_gower dataset if pam clustering was run on it. Based on the fviz_nbclust, 2 clusters were done for pam because 2 clusters had the highest average silhouette width on this graph. With this, PAM was performed on our covid2020_gower dataset and saved to pam_results. Within pam_results, the center for cluster 1 was found to be Ukraine and the center of cluster 2 was found to be Mozambique. The silhouette width for running pam with 2 clusters was found to be about .436 which indcated that the structure was weak and could be artificial. The clustering results were then added to the covid2020gow dataset and saved to the covid_pam dataset. *
+
+
+## Pairwise Clustering Plot 
+```{r fig.dim = c(15, 15)}
+# Visualize the clusters by showing all pairwise combinations of variables colored by cluster assignment 
+ggpairs(covid_pam, columns = 1:11, aes(color = cluster))
+```
+*We visualized the clusters by showing all pairwise combinations of variables colored by clusters from the covid_pam dataset. The visualization shows the values for overall correlation and cluster-specific correlation between pairs of variables. The visualization also shows the distribution of values in the different clusters for 2 variables at a time in pairwise graphs.*
+
+
+##Clustering and PCA
+```{r}
+# Import the HDI dataset for different countries around the world
+HDI <- read_csv("HDI.csv")
+
+# Inner join the covid2020 dataset with the HDI dataset and call the merged dataset 'covid2020hdi'
+covid2020hdi <- covid2020 %>%
+  inner_join(HDI, by = c("Country" = "country")) %>%
+  #Remove the variable 'pop2022' from the merged dataset
+  select(!pop2022) %>%
+  # Add a variable named 'development' which has the value of 'developed' if HDI > 0.7 or the value of 'developing' if HDI < 0.7
+  mutate(development = ifelse(hdi > .7, "developed", NA)) %>%
+  mutate(development = ifelse(is.na(development) & hdi < .7, "developing", development))
+
+# Remove NA values from the 'covid2020hdi' dataset
+covid2020hdi <- covid2020hdi %>%
+  na.omit()
+
+# Determine the number of optimum clusters for pam on the 'covid2020scaled' dataset
+fviz_nbclust(covid2020scaled, pam, method="silhouette")
+
+
+# Run pam with 2 clusters for the 'covid2020scaled' dataset
+pam_results2  <- covid2020scaled %>%
+  pam(k = 2)
+
+#Have a look at the pam_results2
+pam_results2
+
+#Determine the countries at the centers of each cluster
+covid2020[96,]
+covid2020[63,]
+
+# Add the clustering results to the 'covid2020scaled' dataset
+covidscaled_pam <- covid2020scaled %>%
+  mutate(cluster = as.factor(pam_results2$clustering))
+
+
+
+# Visualize the clustering results on a PCA graph making sure to show the development status of the countries in each cluster 
+fviz_cluster(pam_results2, data = covid2020scaled, 
+             shape = as.factor(covid2020hdi$development)) +
+  geom_point(aes(shape = as.factor(covid2020hdi$development))) +
+  guides(shape = guide_legend(title = "shape"))
+
+
+# Table showing the relation of clusters made to the development status of the countries
+table(covidscaled_pam$cluster, covid2020hdi$development)
+
+
+#Calculate accuracy 
+(71+20)/97
+```
+*For this code chunk, we hoped to see how well our clusters matched the development status groups for the countries. To do this, we first imported the HDI dataset for different countries around the world. We then inner joined our 'covid2020' dataset with the HDI dataset by country names and kept all variables besides the pop2022 variable from the HDI dataset. We mutated the dataset by creating another variable called "development" in which countries with an hdi (human development index) score above .7 were classified as developed while countries with an hdi score below .7 were classified as developing. We then overwrote our 'covid2020hdi' dataset to exclude NA values. We utilized fvis_nbclust on our 'covid2020scaled' dataset from the PCA chunk of code above and found the optimal number of clusters needed for this scaled dataset was 2 as it had the highest average silhouette width. We then performed PAM on our 'covid2020scaled' dataset with a k value of 2 and the results were saved to pam_results2. Within pam_results2, the center for cluster 1 was found to be Ukraine and the center of cluster 2 was found to be Mozambique. We then mutated our 'covid2020' scaled dataset to include the clustering found from pam_results2 and called the variable cluster. We then visualized our clustering against our development variable using the fviz_cluster function in which the shapes represented the development variable while the color represented the cluster for each observation. We then used the table function to find the similarities between our development variable and clustering from our PAM and found that our clustering was about 93.8% accurate in determining the development status of each country.*
+
+
+##Classification 
+```{r}
+#For each country, assign the 'developed' status a value of '1' and 'developing' status a value of 0
+covid2020hdi <- covid2020hdi %>% mutate (actual = ifelse(hdi> 0.7, 1, 0))
+
+# Add a new variable called 'positivityrate' which is a function of the variables 'Confirmed%', 'Population', 'yearly_test'
+covid2020hdi <- covid2020hdi %>% mutate(positivityrate = (( `Confirmed%`/100)*Population*100)/(yearly_test))
+
+# Use a glm model to create a fit which shows development status based on 'positivityrate', 'Confirmed%', and 'Death%'
+fit <- glm(actual ~ positivityrate + `Confirmed%` + `Death%`, data = covid2020hdi, family = "binomial")
+summary(fit)
+
+# Calculate a predicted probability based on the fit
+log_covid2020hdi <- covid2020hdi %>% 
+  mutate(score = predict(fit, type = "response"),
+         predicted = ifelse(score < 0.5, 0, 1))
+log_covid2020hdi
+
+# Confusion matrix: compare true to predicted condition
+table(log_covid2020hdi$actual, log_covid2020hdi$predicted) %>% addmargins
+
+# Calculate accuracy based on confusion matric
+80/97
+
+
+# Visualize a ROC curve for the glm model 
+ROC <- ggplot(log_covid2020hdi) + 
+  geom_roc(aes(d = actual, m = score), n.cuts = 0)
+ROC
+
+# Calculate the area under the curve for the ROC model 
+calc_auc(ROC)
+
+
+```
+*The covid2020hdi dataset was mutated by adding a new variable called "actual" in which countries with an hdi scores above .7, or developed countries, were given a value of 1 while countries with an hdi score below .7 (developing countries) were given a value of 0. Also, a new variable called positivityrate was added to the dataset in which positivityrate was a function of confirmed%, population, and yearly_test. We then used the glm function on our covid2020hdi data to create a fit which demonstrated the development status based on positivityrate, confirmed%, and death%. This fit was then summarized and displayed. We then calculated a predicted probability based on the fit and saved it to log_covid2020hdi. We then used the table function to compare the predicted and true values. The accuracy was found to be about 82.5%. We then visualized a ROC curve for the glm model and saved it to ROC and found the area under the curve of the ROC model to be about 0.883 which indicated that the model was a good fit.*
+
+
+##Cross-validation with the 'k-fold' method
+```{r}
+# Choose number of folds
+k = 10 
+
+# Randomly order rows in the dataset
+data <- covid2020hdi[sample(nrow(covid2020hdi)), ] 
+
+# Create k folds from the dataset
+folds <- cut(seq(1:nrow(data)), breaks = k, labels = FALSE)
+
+# Use a for loop to get diagnostics for each test set
+diags_k <- NULL
+
+for(i in 1:k){
+  # Create training and test sets
+  train <- data[folds != i, ] # all observations except in fold i
+  test <- data[folds == i, ]  # observations in fold i
+  
+  # Train model on training set (all but fold i)
+  fit <- glm(actual ~ positivityrate + `Confirmed%` + `Death%`, data = train, family = "binomial")
+  
+  # Test model on test set (fold i)
+  df <- data.frame(
+    probability = predict(fit, newdata = test, type = "response"),
+    actual = test$actual)
+  
+  # Consider the ROC curve for the test dataset
+  ROC <- ggplot(df) + 
+    geom_roc(aes(d = actual, m = probability, n.cuts = 0))
+
+  # Get diagnostics for fold i (AUC)
+  diags_k[i] <- calc_auc(ROC)$AUC
+}
+
+#Set Seed to save results
+set.seed(11) 
+
+# Average performance 
+mean(diags_k)
+
+```
+
+*The k-fold cross-validation method was used to see if there were any signs of overfitting. The code chunk above cut the data into 10 folds in which 9 folds were used as the training set and the other 1 fold was used as the test set, this process was repeated till each fold was at least used once as the test set. The average performance obtained from the k-folds method indicated an average area the curve of 0.881 which is very close to the area under the curve of the original model which was 0.883. Thus, the model for the entire dataset does not show any signs of over-fitting as the average AUC of the k-folds cross-validation method almost matched the AUC of the original model, indicating that the model would remain a good fit even if any new data is added.*
+
+
+
+
+
+
+
+
+## References
+*'Health Nutrition and Population Statistics' (HealthStats.csv): [Website Link](https://databank.worldbank.org/source/health-nutrition-and-population-statistics)*
+
+*Context: This dataset was obtained from World Bank, and this dataset contained many population and health statistics for countries around the world.*
+
+
+*'diet2020' (Food_Supply_kcal_Data.csv):  [Website Link](https://www.kaggle.com/datasets/mariaren/covid19-healthy-diet-dataset)*
+
+*Context: This dataset was obtained from Kaggle, and this dataset contained many dietary intake variables, health conditions associated with nutrition, and COVID-19 related data for countries around the world.*
+
+
+*'totaltests' (total-tests-for-covid-19.csv):  [Website Link](https://ourworldindata.org/grapher/full-list-total-tests-for-covid-19?time=latest)*
+
+*Context: This dataset was obtained from the Our World in Data website and contained the total COVID-19 tests conducted daily in many countries around the world*
+
+
+*'HDI' (HDI.csv): [Website Link](https://worldpopulationreview.com/country-rankings/hdi-by-country)*
+
+*Context: The dataset shows the HDI values and population values of different countries around the world*
+
